@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111827" />
+    <title>ESP32 Relay Control</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+        background: #111827;
+        color: #f9fafb;
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          sans-serif;
+      }
+      .panel {
+        width: min(100%, 420px);
+        padding: 28px;
+        border-radius: 20px;
+        background: #1f2937;
+        box-shadow: 0 20px 50px #0005;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.6rem;
+      }
+      .muted {
+        color: #9ca3af;
+        font-size: 0.95rem;
+      }
+      .status {
+        margin: 22px 0;
+        padding: 14px;
+        border-radius: 12px;
+        background: #111827;
+        overflow-wrap: anywhere;
+      }
+      .lamp {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #6b7280;
+        margin-right: 8px;
+      }
+      .lamp.on {
+        background: #22c55e;
+        box-shadow: 0 0 12px #22c55e88;
+      }
+      .lamp.off {
+        background: #ef4444;
+      }
+      .buttons {
+        display: flex;
+        gap: 12px;
+      }
+      button {
+        flex: 1;
+        border: 0;
+        border-radius: 12px;
+        padding: 15px 10px;
+        color: white;
+        font-weight: 700;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+      .on-btn {
+        background: #15803d;
+      }
+      .off-btn {
+        background: #b91c1c;
+      }
+      .refresh {
+        width: 100%;
+        margin-top: 12px;
+        background: #374151;
+      }
+      label {
+        display: block;
+        margin-top: 18px;
+        font-size: 0.9rem;
+        color: #d1d5db;
+      }
+      input {
+        width: 100%;
+        margin-top: 7px;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid #4b5563;
+        background: #111827;
+        color: white;
+      }
+      .hint {
+        margin-top: 18px;
+        font-size: 0.82rem;
+        line-height: 1.5;
+        color: #9ca3af;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="panel">
+      <h1>ESP32 Relay Control</h1>
+      <div class="muted">Kontrol Relay 1 Channel</div>
+
+      <label for="espUrl">Alamat ESP32 yang dapat dijangkau</label>
+      <input
+        id="espUrl"
+        type="url"
+        value="http://10.235.201.125"
+        placeholder="http://alamat-esp32:port"
+        autocomplete="url"
+      />
+
+      <div class="status" aria-live="polite">
+        <span id="lamp" class="lamp"></span>
+        <span id="status">Belum terhubung</span>
+      </div>
+
+      <div class="buttons">
+        <button class="on-btn" id="onBtn" onclick="sendCommand('on')">
+          RELAY ON
+        </button>
+        <button class="off-btn" id="offBtn" onclick="sendCommand('off')">
+          RELAY OFF
+        </button>
+      </div>
+      <button class="refresh" id="statusBtn" onclick="readStatus()">
+        PERIKSA STATUS
+      </button>
+
+      <p class="hint">
+        Endpoint: <code>/relay/on</code>, <code>/relay/off</code>, dan
+        <code>/relay/status</code>. Alamat default adalah contoh IP lokal; ganti
+        dengan alamat yang benar-benar dapat dijangkau dari browser.
+      </p>
+    </main>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const lampEl = document.getElementById("lamp");
+      const buttons = [...document.querySelectorAll("button")];
+
+      function baseUrl() {
+        return document
+          .getElementById("espUrl")
+          .value.trim()
+          .replace(/\/+$/, "");
+      }
+
+      async function request(path) {
+        const url = baseUrl();
+        if (!url || !/^https?:\/\//i.test(url)) {
+          throw new Error("Masukkan alamat ESP32 dengan http:// atau https://");
+        }
+        // no-cors sengaja tidak digunakan: respons tidak akan bisa dibaca.
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+        try {
+          const response = await fetch(url + path, {
+            method: "GET",
+            mode: "cors",
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return await response.text();
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
+      async function sendCommand(command) {
+        buttons.forEach((b) => (b.disabled = true));
+        statusEl.textContent =
+          "Mengirim perintah " + command.toUpperCase() + "...";
+        try {
+          const result = await request("/relay/" + command);
+          statusEl.textContent = result || "Perintah terkirim";
+          lampEl.className = "lamp " + (command === "on" ? "on" : "off");
+        } catch (err) {
+          statusEl.textContent =
+            "Gagal: " +
+            (err.name === "AbortError" ? "waktu request habis" : err.message);
+          lampEl.className = "lamp";
+        } finally {
+          buttons.forEach((b) => (b.disabled = false));
+        }
+      }
+
+      async function readStatus() {
+        buttons.forEach((b) => (b.disabled = true));
+        statusEl.textContent = "Memeriksa status...";
+        try {
+          const result = await request("/relay/status");
+          statusEl.textContent = result;
+          const data = JSON.parse(result);
+          lampEl.className =
+            "lamp " +
+            (data.relay === "ON" ? "on" : data.relay === "OFF" ? "off" : "");
+        } catch (err) {
+          statusEl.textContent =
+            "Gagal: " +
+            (err.name === "AbortError" ? "waktu request habis" : err.message);
+          lampEl.className = "lamp";
+        } finally {
+          buttons.forEach((b) => (b.disabled = false));
+        }
+      }
+    </script>
+  </body>
+</html>
